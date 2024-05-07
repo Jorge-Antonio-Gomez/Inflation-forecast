@@ -148,7 +148,7 @@ plot_1 <- ggplot() +
 ggsave("plot_1.pdf", plot = plot_1, width = 10, height = 5)
 
 
-
+# pvt el que lo lea
 ```
 
 
