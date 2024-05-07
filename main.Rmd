@@ -1,0 +1,299 @@
+<!-- HEAD -->
+
+
+# Datos y Entorno
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+# Librerías
+  # install.packages(c("readxl", "dplyr", "ggplot2", "forecast"))
+  # install.packages(tseries)
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(forecast)
+library(tseries)
+```
+
+
+```{r}
+getwd() # "C:/Users/antonio.gomez/Desktop/inf-forecast"
+setwd("E:/CIDE/Series de Tiempo/Inflation forecast")
+
+# Import from base.xslx:
+data <- read_excel("base.xlsx")
+  tail(data)
+
+# Renombrar columnas:
+colnames(data) <- c("fecha", "expect_t", "expect_t1", "inflation")
+
+# Data frame with expect_t e inflation:
+df <- data.frame(data$fecha, data$expect_t, data$inflation, data$expect_t1)
+  colnames(df) <- c("fecha", "expect_t", "inflation", "expect_t1")
+  tail(df)
+
+# get data from:
+start_year = 2000
+
+# Take data from start_year (df have text as YYYY/MM/DD):
+df <- filter(df, as.numeric(format(df$fecha, "%Y")) >= start_year)
+  # tail(df)
+  
+# rm(df)
+```
+
+# Análisis Exploratorio
+
+## Determinar la precisión con la que el signo de la expectativas de inflación coincide con el signo de la inflación observada.
+
+Expectativas con $\delta \pi^e_t <= 0.11$ son 50% precisas con respecto a la inflación observada.
+
+```{r}
+# Filter rows with values <= 0.11:
+df <- filter(df, expect_t <= 0.11, expect_t >= -0.11, inflation <= 0.11, inflation >= -0.11)
+  tail(df)
+
+# a vector that saves the sign of each difference:
+df$sign_diff_expect_t <- ifelse(df$expect_t >= 0, 1, -1) # 1 if inflation is increasing, -1 if decreasing
+  # head(df)
+  # tail(df)
+
+df$sign_diff_inflation <- ifelse(df$inflation >= 0, 1, -1) # 1 if inflation is increasing, -1 if decreasing
+  # head(df)
+  # tail(df)
+
+valid_expectation <- df$sign_diff_inflation == df$sign_diff_expect_t
+
+# Porcentajes:
+correct_expectation <- sum( na.omit(valid_expectation) == TRUE ) / length(na.omit(valid_expectation)) * 100
+wrong_expectation <- sum( na.omit(valid_expectation) == FALSE ) / length(na.omit(valid_expectation)) * 100
+
+
+# For all data
+cbind(correct_expectation, wrong_expectation)
+```
+
+¿Qué modelo es mejor utilizar?
+
+
+# Forecasting
+
+## Modelo con 12 dummies
+
+El modelo que ejucateremos es el siguiente:
+
+
+Modelo 1:
+
+$$
+\pi_{t} = \mu + \beta_1 \pi_{t-1} + \sum_{i=1}^{12} \gamma_{i} D_i + \varepsilon_t
+$$
+
+
+Modelo 2 (pendiente):
+
+$$
+\pi_{t} = \mu + \beta_1 \pi_{t-1} + \beta_2 \pi_{t-12} + \beta_2 \pi_{t-24} + \sum_{i=1}^{12} \gamma_{i} D_i + \varepsilon_t
+$$
+
+### Modelo 1
+
+Creación de rezagos y dummies:
+```{r}
+# Inflation lag:
+df$inflation_lag <- c(NA, df$inflation[1:dim(df)[1]-1])
+
+# Crear dummies:
+df$month <- as.numeric(format(df$fecha, "%m"))
+
+# Crear dummies:
+for (i in 1:12) {
+  df[paste0("D_", i)] <- ifelse(df$month == i, 1, 0)
+}
+
+# head(df)
+```
+
+```{r}
+# Modelo:
+model <- lm(inflation ~ inflation_lag + D_1 + D_2 + D_3 + D_4 + D_5 + D_6 + D_7 + D_8 + D_9 + D_10 + D_11 + D_12, data = df)
+summary(model)
+```
+
+
+
+## AUTO.ARIMA
+
+```{r}
+# Convertir a serie de tiempo con fechas:
+ts_inflation <- ts(df$inflation, start = c(start_year, 1), frequency = 12)
+ts_expect_t  <- ts(df$expect_t,  start = c(start_year, 1), frequency = 12)
+ts_expect_t1 <- ts(df$expect_t1, start = c(start_year, 1), frequency = 12)
+
+# AUTO.ARIMA:
+auto.arima(ts_inflation)
+```
+
+Gráfica de la serie:
+
+```{r}
+plot_1 <- ggplot() +
+  geom_line(data = ts_inflation, aes(x = time(ts_inflation), y = ts_inflation), color = "black") +
+  labs(title = "Inflation Series", x = "Time", y = "Inflation") +
+  # trimestralmente:
+  scale_x_continuous(breaks = seq(start_year, 2024, 1)) +
+  theme_minimal()
+
+# To show plot as pdf:
+ggsave("plot_1.pdf", plot = plot_1, width = 10, height = 5)
+
+
+
+```
+
+
+```{r}
+# Time series de 2015 a 2024 (con for):
+
+# prev horizon (¿Qué tan al pasado quiere observar? (en años))
+horizon     <- 10 # since 2015
+# Current year in data:
+currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
+# Horizon year:
+horizonYear <- currentYear - horizon
+
+
+for (i in 1:12) {
+  assign(paste0("ts_inflation_", horizonYear), window(ts_inflation, start = c(horizonYear, 1), end = c(horizonYear, 12)))
+}
+```
+
+Gráfica:
+
+```{r}
+# Plotear todas las series superpuestas (sin contar la general)
+ggplot() +
+  geom_line(data = ts_inflation_2015, aes(label = "2015", x = 1:12, y = ts_inflation_2015), color = "black") +
+  geom_line(data = ts_inflation_2016, aes(x = 1:12, y = ts_inflation_2016), color = "gray") +
+  geom_line(data = ts_inflation_2017, aes(x = 1:12, y = ts_inflation_2017), color = "purple") +
+  geom_line(data = ts_inflation_2018, aes(x = 1:12, y = ts_inflation_2018), color = "blue") +
+  geom_line(data = ts_inflation_2019, aes(x = 1:12, y = ts_inflation_2019), color = "green") +
+  geom_line(data = ts_inflation_2020, aes(x = 1:12, y = ts_inflation_2020), color = "brown") + # Pandemia
+  geom_line(data = ts_inflation_2021, aes(x = 1:12, y = ts_inflation_2021), color = "purple") +
+  geom_line(data = ts_inflation_2022, aes(x = 1:12, y = ts_inflation_2022), color = "orange") +
+  geom_line(data = ts_inflation_2023, aes(x = 1:12, y = ts_inflation_2023), color = "black") +
+  geom_line(data = ts_inflation_2024, aes(x = 1:4, y = ts_inflation_2024), color = "red", lwd = 1.5) +
+  # linea en y = 0:
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  # labels
+  labs(title = "Inflation Forecasting", x = "Month", y = "Inflation") +
+  # De 1 en 1 en x:
+  scale_x_continuous(breaks = seq(1, 12, 1)) +
+  # Label for each line:
+  theme_minimal()
+
+# Plot desde horizonYear in cicle:
+
+```
+## ARIMA(2,0,0)[12]
+
+```{r}
+# ARIMA(2,0,0)[12]:
+  # model_arima_2 <- Arima(ts_inflation, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
+  # model_arima_2
+```
+
+
+
+
+
+
+## Out-of-sample = 24
+
+```{r}
+# Create subSamples:
+
+
+inSample <- window(ts_inflation, end = c(2022, 3))
+outSample <- window(ts_inflation, start = c(2022, 4))
+outSampleExpectation <- window(ts_expect_t, start = c(2022, 4))
+
+# ARIMA(2,0,0)[12]:
+model_arima_2 <- Arima(inSample, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
+
+# Forecast one step ahead:
+  # forecast_arima_2 <- forecast(model_arima_2, h = 24)
+  # forecast_arima_2
+
+# Integrate the observed to the inSample:
+forecast_arima_2 <- rep(NA, 25)
+for (i in 1:25) {
+  inSample <- window(ts_inflation, end = c(2022, 3 + i))
+  model_arima_2 <- Arima(inSample, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
+  forecast_arima_2[i] <- forecast(model_arima_2, h = 1)$mean
+}
+
+forecast_arima_2 <- ts(forecast_arima_2, start = c(2022, 4), frequency = 12)
+
+# lower95 = 4° col
+# upper95 = 5° col
+
+# df_forecast <- data.frame(time = time(forecast_arima_2$mean), forecast_arima_2$mean, forecast_arima_2$lower[, 2], forecast_arima_2$upper[, 2])
+df_forecast <- data.frame(time = time(forecast_arima_2), forecast_arima_2)
+  colnames(df_forecast) <- c("time", "forecast_arima_2")
+  tail(df_forecast)
+```
+
+```{r}
+# Plot de la predicción (con intervalos de confianza) y de los datos reales (outSample):
+time <- time(outSample)
+
+ggplot() +
+  geom_line(data = df_forecast, aes(x = time, y = forecast_arima_2), color = "brown", linetype = "dashed") +
+  # geom_line(data = df_forecast, aes(x = time, y = forecast_arima_2$lower[ ,2]), color = "red") +
+  # geom_line(data = df_forecast, aes(x = time, y = forecast_arima_2$upper[ ,2]), color = "red") +
+  geom_line(data = outSample, aes(x = time, y = outSample), color = "black") +
+  geom_line(data = outSampleExpectation, aes(x = time, y = outSampleExpectation), color = "gray", linetype = "dashed") +
+  labs(title = "ARIMA(2,0,0)[12] Forecasting", x = "Time", y = "Inflation") +
+  # 1 to 1 month in x:
+  # scale_x_continuous(breaks = seq(2022, 2024, 1)) +
+  # Un cuadro que identificada el color de cada línea:
+  # Linea en y=0:
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  scale_color_manual(values = c("black", "brown", "gray")) +
+  theme_minimal()
+
+length(outSample)
+length(forecast_arima_2)
+```
+### RMSFE
+
+```{r}
+# Forecast de abril de 2024:
+forecast_arima_2[25]
+```
+
+```{r}
+# Quitar último elemento (abr 2024):
+outSample <- window(outSample, end = c(2024, 3))
+forecast_arima_2 <- window(forecast_arima_2, end = c(2024, 3))
+outSampleExpectation <- window(outSampleExpectation, end = c(2024, 3))
+
+cbind(length(outSample), length(forecast_arima_2), length(outSampleExpectation))
+
+# RMSFE del forecast:
+RMSFE_arima_2 <- sqrt(mean((outSample - forecast_arima_2)^2))
+RMSFE_expectation <- sqrt(mean((outSample - outSampleExpectation)^2))
+
+rmsfe_df <- data.frame(RMSFE_arima_2, RMSFE_expectation)
+  rmsfe_df
+```
+
+
+## ARIMA(0,1,0)
+
+```{r}
+# ARIMA(0,1,0):
+model_rw
+```
+
