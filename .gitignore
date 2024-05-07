@@ -1,0 +1,2 @@
+*.xlsx   # Ignora todos los archivos con extensión .xlsx
+plot*    # Ignora todos los archivos que comiencen con 'plot'
