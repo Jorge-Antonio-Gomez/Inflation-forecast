@@ -39,8 +39,15 @@ start_year = 2000
 df <- filter(df, as.numeric(format(df$fecha, "%Y")) >= start_year)
   # tail(df)
   
-# rm(df)
+# Convertir a serie de tiempo con fechas:
+ts_inflation <- ts(df$inflation, start = c(start_year, 1), frequency = 12)
+ts_expect_t  <- ts(df$expect_t,  start = c(start_year, 1), frequency = 12)
+ts_expect_t1 <- ts(df$expect_t1, start = c(start_year, 1), frequency = 12)
+
+currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
 ```
+
+# rm(df)
 
 # Análisis Exploratorio
 
@@ -48,7 +55,8 @@ df <- filter(df, as.numeric(format(df$fecha, "%Y")) >= start_year)
 
 Expectativas con $\delta \pi^e_t <= 0.11$ son 50% precisas con respecto a la inflación observada.
 
-```{r}
+
+```{r, eval = FALSE}
 # Filter rows with values <= 0.11:
 df <- filter(df, expect_t <= 0.11, expect_t >= -0.11, inflation <= 0.11, inflation >= -0.11)
   tail(df)
@@ -74,6 +82,16 @@ cbind(correct_expectation, wrong_expectation)
 ```
 
 ¿Qué modelo es mejor utilizar?
+
+## Función de autocorrelación `ACF()`:
+
+```{r}
+years = currentYear - start_year
+months = years * 12
+# ACF (no partial) monthly:
+acf(na.omit(ts_inflation), lag.max = months, main = "ACF Inflation")
+```
+
 
 
 # Forecasting
@@ -124,12 +142,9 @@ summary(model)
 
 ## AUTO.ARIMA
 
-```{r}
-# Convertir a serie de tiempo con fechas:
-ts_inflation <- ts(df$inflation, start = c(start_year, 1), frequency = 12)
-ts_expect_t  <- ts(df$expect_t,  start = c(start_year, 1), frequency = 12)
-ts_expect_t1 <- ts(df$expect_t1, start = c(start_year, 1), frequency = 12)
+Analizando los datos con un AUTO.ARIMA
 
+```{r, eval = FALSE}
 # AUTO.ARIMA:
 auto.arima(ts_inflation)
 ```
@@ -145,10 +160,8 @@ plot_1 <- ggplot() +
   theme_minimal()
 
 # To show plot as pdf:
-ggsave("plot_1.pdf", plot = plot_1, width = 10, height = 5)
-
-
-# pvt el que lo lea
+ggsave("plot_times_series.pdf", plot = plot_1, width = 10, height = 5)
+plot_1
 ```
 
 
@@ -156,9 +169,8 @@ ggsave("plot_1.pdf", plot = plot_1, width = 10, height = 5)
 # Time series de 2015 a 2024 (con for):
 
 # prev horizon (¿Qué tan al pasado quiere observar? (en años))
-horizon     <- 10 # since 2015
-# Current year in data:
-currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
+horizon <- 10 # since 2015
+
 # Horizon year:
 horizonYear <- currentYear - horizon
 
@@ -173,7 +185,8 @@ Gráfica:
 ```{r}
 # Plotear todas las series superpuestas (sin contar la general)
 ggplot() +
-  geom_line(data = ts_inflation_2015, aes(label = "2015", x = 1:12, y = ts_inflation_2015), color = "black") +
+  geom_line(data = ts_inflation_2014, aes(x = 1:12, y = ts_inflation_2015), color = "pink") +
+  geom_line(data = ts_inflation_2015, aes(x = 1:12, y = ts_inflation_2015), color = "black") +
   geom_line(data = ts_inflation_2016, aes(x = 1:12, y = ts_inflation_2016), color = "gray") +
   geom_line(data = ts_inflation_2017, aes(x = 1:12, y = ts_inflation_2017), color = "purple") +
   geom_line(data = ts_inflation_2018, aes(x = 1:12, y = ts_inflation_2018), color = "blue") +
@@ -205,21 +218,22 @@ ggplot() +
 
 
 
+## Submuestras
+
+```{r}
+# Create subSamples:
+inSample <- window(ts_inflation, end = c(2022, 3))
+outSample <- window(ts_inflation, start = c(2022, 4))
+outSampleExpectation <- window(ts_expect_t, start = c(2022, 4))
+```
 
 
 
 ## Out-of-sample = 24
 
 ```{r}
-# Create subSamples:
-
-
-inSample <- window(ts_inflation, end = c(2022, 3))
-outSample <- window(ts_inflation, start = c(2022, 4))
-outSampleExpectation <- window(ts_expect_t, start = c(2022, 4))
-
 # ARIMA(2,0,0)[12]:
-model_arima_2 <- Arima(inSample, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
+ # model_arima_2 <- Arima(inSample, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
 
 # Forecast one step ahead:
   # forecast_arima_2 <- forecast(model_arima_2, h = 24)
@@ -232,6 +246,36 @@ for (i in 1:25) {
   model_arima_2 <- Arima(inSample, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
   forecast_arima_2[i] <- forecast(model_arima_2, h = 1)$mean
 }
+
+# IN FUNCTION:
+   # serie: i.e. ts_inflation
+   # modelname: i.e. arima_2
+   # order: i.e. c(2,0,0)
+   # period: i.e. 12 (1 if you don't want deterministic seasonality)
+   # outSampleSize: i.e. 24
+iterate_forecast <- function(serie, model_name, order, outSampleSize, period) {
+  # Number of forecasts:
+  nfcast <- outSampleSize + 1
+  
+  # Start year of the forecast (using nfcast):
+  startYearToFcast <- currentYear - (outSampleSize*12)
+  
+  # Create a vector to save the forecast:
+  paste0("forecast_", modelname) <- rep(NA, nfcast)
+  
+  # Cicle
+  # for (i in 1:(nfcast + 1)) {
+  #   inSample <- window(serie, end = c(2022, 3 + i))
+  #   model <- Arima(inSample, order = order, seasonal = list(order = c(0,0,0), period = period))
+  #   paste0("forecast_", modelname)[i] <- forecast(model, h = 1)$mean
+  # }
+  # 
+  # return(paste0("forecast_", modelname))
+}
+
+iterate_forecast(ts_inflation, "rw", c(0,1,0), 1, 12)
+
+
 
 forecast_arima_2 <- ts(forecast_arima_2, start = c(2022, 4), frequency = 12)
 
@@ -266,6 +310,7 @@ ggplot() +
 length(outSample)
 length(forecast_arima_2)
 ```
+
 ### RMSFE
 
 ```{r}
@@ -293,7 +338,8 @@ rmsfe_df <- data.frame(RMSFE_arima_2, RMSFE_expectation)
 ## ARIMA(0,1,0)
 
 ```{r}
-# ARIMA(0,1,0):
-model_rw
+# ARIMA(0,1,0) not seasonal:
+model_rw <- Arima(ts_inflation, order = c(0,1,0))
+  model_rw
 ```
 
