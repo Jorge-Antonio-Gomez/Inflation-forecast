@@ -1,9 +1,12 @@
+
 <!-- HEAD -->
-
-
 # Datos y Entorno
 
-```{r, message = FALSE, warning = FALSE, echo = FALSE}
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE, results = "hide"}
+# To clear the environment:
+  # rm(list = ls())
+
 # Librerías
   # install.packages(c("readxl", "dplyr", "ggplot2", "forecast"))
   # install.packages(tseries)
@@ -46,8 +49,6 @@ ts_expect_t1 <- ts(df$expect_t1, start = c(start_year, 1), frequency = 12)
 
 currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
 ```
-
-# rm(df)
 
 # Análisis Exploratorio
 
@@ -129,13 +130,27 @@ for (i in 1:12) {
   df[paste0("D_", i)] <- ifelse(df$month == i, 1, 0)
 }
 
+nrow(df)
+
+# df sin la última fila:
+df_reduced <- df[1:dim(df)[1]-1,]
+nrow(df_reduced)
+df_last <- df[dim(df)[1],]
+
 # head(df)
 ```
 
 ```{r}
 # Modelo:
-model <- lm(inflation ~ inflation_lag + D_1 + D_2 + D_3 + D_4 + D_5 + D_6 + D_7 + D_8 + D_9 + D_10 + D_11 + D_12, data = df)
+model <- lm(inflation ~ inflation_lag + D_1 + D_2 + D_3 + D_4 + D_5 + D_6 + D_7 + D_8 + D_9 + D_10 + D_11 + D_12, data = df_reduced)
 summary(model)
+```
+
+
+```{r}
+# Forecast para el siguiente periodo:
+forecast_inflation <- forecast(model, h = 1, level = 0.90, newdata = df_last)
+forecast_inflation
 ```
 
 
@@ -149,7 +164,7 @@ Analizando los datos con un AUTO.ARIMA
 auto.arima(ts_inflation)
 ```
 
-Gráfica de la serie:
+## Gráfica de la serie:
 
 ```{r}
 plot_1 <- ggplot() +
@@ -176,7 +191,7 @@ horizonYear <- currentYear - horizon
 
 
 for (i in 1:12) {
-  assign(paste0("ts_inflation_", horizonYear), window(ts_inflation, start = c(horizonYear, 1), end = c(horizonYear, 12)))
+  assign(paste0("ts_inflation_", horizonYear), window(ts_inflation, start = c(horizonYear, 1), end = c(horizonYear, 12)), envir = .GlobalEnv)
 }
 ```
 
@@ -208,6 +223,7 @@ ggplot() +
 # Plot desde horizonYear in cicle:
 
 ```
+
 ## ARIMA(2,0,0)[12]
 
 ```{r}
@@ -229,7 +245,7 @@ outSampleExpectation <- window(ts_expect_t, start = c(2022, 4))
 
 
 
-## Out-of-sample = 24
+## ARIMA(0,1,0)[12] con Out-of-sample = 24
 
 ```{r}
 # ARIMA(2,0,0)[12]:
@@ -239,76 +255,128 @@ outSampleExpectation <- window(ts_expect_t, start = c(2022, 4))
   # forecast_arima_2 <- forecast(model_arima_2, h = 24)
   # forecast_arima_2
 
-# Integrate the observed to the inSample:
-forecast_arima_2 <- rep(NA, 25)
+# Integrate the observed to the inSample (A PATA):
+forecast_rw <- rep(NA, 25)
 for (i in 1:25) {
-  inSample <- window(ts_inflation, end = c(2022, 3 + i))
-  model_arima_2 <- Arima(inSample, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
-  forecast_arima_2[i] <- forecast(model_arima_2, h = 1)$mean
+  inSample <- window(ts_inflation, end = c(2022, 2 + i))
+  # print(paste0("c(2022, ", 2 + i, ")"))
+  model_rw <- Arima(inSample, order = c(0,1,0), seasonal = list(order = c(0,0,0), period = 1))
+  # model_arima_2 <- Arima(inSample, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
+  forecast_rw[i] <- forecast(model_rw, h = 1)$mean
 }
 
+
+df_forecast <- data.frame(time = time(forecast_rw), forecast_rw)
+  colnames(df_forecast) <- c("time", "forecast_rw")
+  tail(df_forecast)
+```
+
+
+## Función de cualquier modelo ARIMA con Out-of-sample = m
+
+
+```{r}
 # IN FUNCTION:
-   # serie: i.e. ts_inflation
-   # modelname: i.e. arima_2
-   # order: i.e. c(2,0,0)
-   # period: i.e. 12 (1 if you don't want deterministic seasonality)
-   # outSampleSize: i.e. 24
-iterate_forecast <- function(serie, model_name, order, outSampleSize, period) {
+   # serie: i.e. ts_inflation  (Time series data)
+   # modelname: i.e. arima_2   (Name of the model)
+   # order: i.e. c(2,0,0)      (ARIMA order)
+   # outSampleSize: i.e. 24    (Tamaño de la muestra de validación)
+   # period: i.e. 12           (1 if you don't want deterministic seasonality)
+   # h: i.e. 1                 (1 if you want to forecast one step ahead)
+
+iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h) {
   # Number of forecasts:
-  nfcast <- outSampleSize + 1
+  nfcast <- outSampleSize + h
   
   # Start year of the forecast (using nfcast):
-  startYearToFcast <- currentYear - (outSampleSize*12)
+  lastMonth <- end(serie)[2]
+  startYearToFcast <- floor(currentYear + ((lastMonth)/12) - ((outSampleSize)/12) )
+  start_month_index <- lastMonth - (outSampleSize %% 12)
+  end_month_index <- start_month_index - 1
+  
+    if (start_month_index <= 0) {
+      start_month_index <- 12 + start_month_index
+      end_month_index <- start_month_index - 1
+      startYearToFcast <- startYearToFcast - 1
+    }
+  
+  
   
   # Create a vector to save the forecast:
-  paste0("forecast_", modelname) <- rep(NA, nfcast)
+  forecast_vector <- rep(NA, nfcast)
   
   # Cicle
-  # for (i in 1:(nfcast + 1)) {
-  #   inSample <- window(serie, end = c(2022, 3 + i))
-  #   model <- Arima(inSample, order = order, seasonal = list(order = c(0,0,0), period = period))
-  #   paste0("forecast_", modelname)[i] <- forecast(model, h = 1)$mean
-  # }
-  # 
-  # return(paste0("forecast_", modelname))
+  for (i in 1:nfcast) {
+    print(paste0("Final de la in-Sample: c(", startYearToFcast, ", ", end_month_index - h + i, ")"))
+    inSample <- window(serie, end = c(startYearToFcast, end_month_index - h + i))
+    model <- Arima(inSample, order = order, seasonal = list(order = c(0,0,0), period = period))
+    
+    forecast_vector[i] <- forecast(model, h = h)$mean
+    # print(forecast_vector[i])
+  }
+  
+  # Date of the out-of-sample:
+  Date <- seq(as.Date(paste0(startYearToFcast, "-", end_month_index + 1, "-01")), by = "month", length.out = nfcast)
+  assign("Date", Date, envir = .GlobalEnv)
+  
+  # convert `forecast_vector` to a time series:
+  forecast_vector <- ts(forecast_vector, start = c(startYearToFcast, end_month_index + 1), frequency = 12)
+  
+  # Create a data frame with the forecast:
+  assign(paste0("forecast_", model_name), forecast_vector, envir = .GlobalEnv)
+  
+  # Creación de un outSample_observed y un outSample_expected and declare them as global variables:
+  assign("outSample_observed", window(serie, start = c(startYearToFcast, end_month_index + 1)), envir = .GlobalEnv)
+  assign("outSample_expected", window(ts_expect_t, start = c(startYearToFcast, end_month_index + 1)), envir = .GlobalEnv)
+  
+  return(forecast_vector)
+  # El output es una serie de tiempo con las predicciones llamada forecast_"model_name", donde "model_name" es el nombre del modelo.
 }
 
-iterate_forecast(ts_inflation, "rw", c(0,1,0), 1, 12)
+# 
+iterate_forecast(ts_inflation, "rw", c(0,1,0), 1, 24, 1)
+iterate_forecast(ts_inflation, "arima100", c(2,0,0), 12, 24, 1)
 
-
-
-forecast_arima_2 <- ts(forecast_arima_2, start = c(2022, 4), frequency = 12)
-
-# lower95 = 4° col
-# upper95 = 5° col
-
-# df_forecast <- data.frame(time = time(forecast_arima_2$mean), forecast_arima_2$mean, forecast_arima_2$lower[, 2], forecast_arima_2$upper[, 2])
-df_forecast <- data.frame(time = time(forecast_arima_2), forecast_arima_2)
-  colnames(df_forecast) <- c("time", "forecast_arima_2")
-  tail(df_forecast)
+forecast_arima200
+forecast_1 <- forecast_arima100
 ```
 
 ```{r}
 # Plot de la predicción (con intervalos de confianza) y de los datos reales (outSample):
-time <- time(outSample)
+time <- Date
 
-ggplot() +
-  geom_line(data = df_forecast, aes(x = time, y = forecast_arima_2), color = "brown", linetype = "dashed") +
+plot_2 <- ggplot() +
+  geom_line(data = forecast_1, aes(x = time, y = forecast_1), color = "orange", linetype = "dashed") +
+  # geom_line(data = forecast_arima200, aes(x = time, y = forecast_arima200), color = "brown", linetype = "dashed") +
   # geom_line(data = df_forecast, aes(x = time, y = forecast_arima_2$lower[ ,2]), color = "red") +
   # geom_line(data = df_forecast, aes(x = time, y = forecast_arima_2$upper[ ,2]), color = "red") +
-  geom_line(data = outSample, aes(x = time, y = outSample), color = "black") +
-  geom_line(data = outSampleExpectation, aes(x = time, y = outSampleExpectation), color = "gray", linetype = "dashed") +
-  labs(title = "ARIMA(2,0,0)[12] Forecasting", x = "Time", y = "Inflation") +
-  # 1 to 1 month in x:
-  # scale_x_continuous(breaks = seq(2022, 2024, 1)) +
-  # Un cuadro que identificada el color de cada línea:
-  # Linea en y=0:
+  
+  # Datos observados:
+  geom_line(data = outSample_observed, aes(x = time, y = outSample_observed), color = "black") +
+  
+  # Expectativa de los datos observados:
+  geom_line(data = outSample_expected, aes(x = time, y = outSample_expected), color = "gray", linetype = "dashed") +
+  
+  # Título y ejes:
+  labs(title = "ARIMA Forecasting", x = "Time", y = "Inflation") +
+  # Línea en y = 0:
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
-  scale_color_manual(values = c("black", "brown", "gray")) +
+  # Put the legend at the bottom:
+  # theme(legend.position = "bottom") +
+  
+  # Otras cosas:
+  # Forecastito (cuatro valores):
+  # geom_line(data = forecastito, aes(x = forecastito_time, y = forecastito), color = "darkgreen", linetype = "dashed") +
+  
+  # X ticks mensuales y rotados 90 grados:
+  scale_x_date(date_labels = "%b %Y", date_breaks = "1 month") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   theme_minimal()
 
-length(outSample)
-length(forecast_arima_2)
+# pdf saved and opened:
+ggsave("plot_2.pdf", plot_2, width = 10, height = 6)
+plot_2
+
 ```
 
 ### RMSFE
