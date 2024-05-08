@@ -1,11 +1,11 @@
 
 <!-- HEAD -->
-# Datos y Entorno
+# Entorno
 
 
 ```{r, message = FALSE, warning = FALSE, echo = FALSE, results = "hide"}
 # To clear the environment:
-  # rm(list = ls())
+  rm(list = ls())
 
 # Librerías
   # install.packages(c("readxl", "dplyr", "ggplot2", "forecast"))
@@ -16,12 +16,14 @@ library(dplyr)
 library(ggplot2)
 library(forecast)
 library(tseries)
+
 ```
 
+# Datos
 
 ```{r}
 getwd() # "C:/Users/antonio.gomez/Desktop/inf-forecast"
-setwd("E:/CIDE/Series de Tiempo/Inflation forecast")
+setwd("C:/Users/antonio.gomez/Desktop/Inflation forecast")
 
 # Import from base.xslx:
 data <- read_excel("base.xlsx")
@@ -33,10 +35,11 @@ colnames(data) <- c("fecha", "expect_t", "expect_t1", "inflation")
 # Data frame with expect_t e inflation:
 df <- data.frame(data$fecha, data$expect_t, data$inflation, data$expect_t1)
   colnames(df) <- c("fecha", "expect_t", "inflation", "expect_t1")
-  tail(df)
+  # head(df)
+  # tail(df)
 
 # get data from:
-start_year = 2000
+start_year = 2001
 
 # Take data from start_year (df have text as YYYY/MM/DD):
 df <- filter(df, as.numeric(format(df$fecha, "%Y")) >= start_year)
@@ -121,28 +124,34 @@ Creación de rezagos y dummies:
 ```{r}
 # Inflation lag:
 df$inflation_lag <- c(NA, df$inflation[1:dim(df)[1]-1])
+df$inflation_lag12 <- c(rep(NA, 12), df$inflation[12:dim(df)[1]-12])
+df$inflation_lag24 <- c(rep(NA, 24), df$inflation[24:dim(df)[1]-24])
 
 # Crear dummies:
 df$month <- as.numeric(format(df$fecha, "%m"))
 
 # Crear dummies:
 for (i in 1:12) {
-  df[paste0("D_", i)] <- ifelse(df$month == i, 1, 0)
+  dummy <- paste0("D_", i)
+  df[dummy] <- ifelse(df$month == i, 1, 0)
+  assign(paste0("D_", i), df[dummy], envir = .GlobalEnv)
 }
 
 nrow(df)
+head(df)
 
 # df sin la última fila:
 df_reduced <- df[1:dim(df)[1]-1,]
 nrow(df_reduced)
 df_last <- df[dim(df)[1],]
+nrow(df_last)
 
-# head(df)
+cbind("df" = nrow(df), "df_reduced" = nrow(df_reduced), "df_last" = nrow(df_last))
 ```
 
 ```{r}
 # Modelo:
-model <- lm(inflation ~ inflation_lag + D_1 + D_2 + D_3 + D_4 + D_5 + D_6 + D_7 + D_8 + D_9 + D_10 + D_11 + D_12, data = df_reduced)
+model <- lm(inflation ~ inflation_lag +  + D_1 + D_2 + D_3 + D_4 + D_5 + D_6 + D_7 + D_8 + D_9 + D_10 + D_11 + D_12, data = df_reduced)
 summary(model)
 ```
 
@@ -190,34 +199,45 @@ horizon <- 10 # since 2015
 horizonYear <- currentYear - horizon
 
 
-for (i in 1:12) {
-  assign(paste0("ts_inflation_", horizonYear), window(ts_inflation, start = c(horizonYear, 1), end = c(horizonYear, 12)), envir = .GlobalEnv)
+for (i in horizonYear:currentYear) {
+  ts_inflation_year <- window(ts_inflation, start = c(i, 1), end = c(i, 12))
+  assign(paste0("ts_inflation_", i), ts_inflation_year, envir = .GlobalEnv)
 }
 ```
 
 Gráfica:
 
 ```{r}
+# PLOT
+
+# To change numbers per month only (in spanish ):
+  time <- 1:12
+  month <- c("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
+  lwd <- 0.7
+
 # Plotear todas las series superpuestas (sin contar la general)
 ggplot() +
-  geom_line(data = ts_inflation_2014, aes(x = 1:12, y = ts_inflation_2015), color = "pink") +
-  geom_line(data = ts_inflation_2015, aes(x = 1:12, y = ts_inflation_2015), color = "black") +
-  geom_line(data = ts_inflation_2016, aes(x = 1:12, y = ts_inflation_2016), color = "gray") +
-  geom_line(data = ts_inflation_2017, aes(x = 1:12, y = ts_inflation_2017), color = "purple") +
-  geom_line(data = ts_inflation_2018, aes(x = 1:12, y = ts_inflation_2018), color = "blue") +
-  geom_line(data = ts_inflation_2019, aes(x = 1:12, y = ts_inflation_2019), color = "green") +
-  geom_line(data = ts_inflation_2020, aes(x = 1:12, y = ts_inflation_2020), color = "brown") + # Pandemia
-  geom_line(data = ts_inflation_2021, aes(x = 1:12, y = ts_inflation_2021), color = "purple") +
-  geom_line(data = ts_inflation_2022, aes(x = 1:12, y = ts_inflation_2022), color = "orange") +
-  geom_line(data = ts_inflation_2023, aes(x = 1:12, y = ts_inflation_2023), color = "black") +
-  geom_line(data = ts_inflation_2024, aes(x = 1:4, y = ts_inflation_2024), color = "red", lwd = 1.5) +
+  geom_line(data = ts_inflation_2014, aes(x = time, y = ts_inflation_2015), color = "pink", lwd = lwd) +
+  geom_line(data = ts_inflation_2015, aes(x = time, y = ts_inflation_2015), color = "black", lwd = lwd) +
+  geom_line(data = ts_inflation_2016, aes(x = time, y = ts_inflation_2016), color = "gray", lwd = lwd) +
+  geom_line(data = ts_inflation_2017, aes(x = time, y = ts_inflation_2017), color = "purple", lwd = lwd) +
+  geom_line(data = ts_inflation_2018, aes(x = time, y = ts_inflation_2018), color = "blue", lwd = lwd) +
+  geom_line(data = ts_inflation_2019, aes(x = time, y = ts_inflation_2019), color = "green", lwd = lwd) +
+  geom_line(data = ts_inflation_2020, aes(x = time, y = ts_inflation_2020), color = "brown", lwd = lwd) + # Pandemia
+  geom_line(data = ts_inflation_2021, aes(x = time, y = ts_inflation_2021), color = "purple", lwd = lwd) +
+  geom_line(data = ts_inflation_2022, aes(x = time, y = ts_inflation_2022), color = "orange", lwd = lwd) +
+  geom_line(data = ts_inflation_2023, aes(x = time, y = ts_inflation_2023), color = "black", lwd = lwd) +
+  geom_line(data = ts_inflation_2024, aes(x = time[1:4], y = ts_inflation_2024), color = "red", lwd = 1.5, method = "loess") +
   # linea en y = 0:
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   # labels
-  labs(title = "Inflation Forecasting", x = "Month", y = "Inflation") +
+  labs(title = "Inflación mensual. Desde 2014 hasta abril de 2024", x = "Mes", y = "Inflación mensual",
+       caption = "Source: Banco de México, 2024",
+       color = "Year") +
   # De 1 en 1 en x:
-  scale_x_continuous(breaks = seq(1, 12, 1)) +
+  scale_x_continuous(breaks = seq(1, 12, 1), labels = month) +
   # Label for each line:
+  # geom_label(data = data.frame(x = 1, y = 0.1, label = "2024"), aes(x = x, y = y, label = label), color = "red") +
   theme_minimal()
 
 # Plot desde horizonYear in cicle:
