@@ -53,6 +53,14 @@ ts_expect_t1 <- ts(df$expect_t1, start = c(start_year, 1), frequency = 12)
 currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
 ```
 
+## Datos (CETES A 28 días)
+```{r}
+# Cetes a 28 días .csv:
+cetes28 <- read.csv("cetes_28.csv")
+  tail(cetes28)
+```
+
+
 # Análisis Exploratorio
 
 ## Determinar la precisión con la que el signo de la expectativas de inflación coincide con el signo de la inflación observada.
@@ -151,7 +159,7 @@ cbind("df" = nrow(df), "df_reduced" = nrow(df_reduced), "df_last" = nrow(df_last
 
 ```{r}
 # Modelo:
-model <- lm(inflation ~ inflation_lag +  + D_1 + D_2 + D_3 + D_4 + D_5 + D_6 + D_7 + D_8 + D_9 + D_10 + D_11 + D_12, data = df_reduced)
+model <- lm(inflation ~ inflation_lag + inflation_lag12 + inflation_lag24, data = df_reduced)
 summary(model)
 ```
 
@@ -189,8 +197,10 @@ plot_1
 ```
 
 
+## Gráfica de años superpuesta (NO CORRER si no es necesario)
+
 ```{r}
-# Time series de 2015 a 2024 (con for):
+# Plot partiendo en años:
 
 # prev horizon (¿Qué tan al pasado quiere observar? (en años))
 horizon <- 10 # since 2015
@@ -244,17 +254,8 @@ ggplot() +
 
 ```
 
-## ARIMA(2,0,0)[12]
 
-```{r}
-# ARIMA(2,0,0)[12]:
-  # model_arima_2 <- Arima(ts_inflation, order = c(2,0,0), seasonal = list(order = c(0,0,0), period = 12))
-  # model_arima_2
-```
-
-
-
-## Submuestras
+## Submuestras (NO CORRER si no es necesario)
 
 ```{r}
 # Create subSamples:
@@ -265,7 +266,7 @@ outSampleExpectation <- window(ts_expect_t, start = c(2022, 4))
 
 
 
-## ARIMA(0,1,0)[12] con Out-of-sample = 24
+## ARIMA(0,1,0)[12] con Out-of-sample = 24 (NO CORRER si no es necesario)
 
 ```{r}
 # ARIMA(2,0,0)[12]:
@@ -291,12 +292,10 @@ df_forecast <- data.frame(time = time(forecast_rw), forecast_rw)
   tail(df_forecast)
 ```
 
-
-## Función de cualquier modelo ARIMA con Out-of-sample = m
-
+## Función para iterar en el forecast con ARIMAS
 
 ```{r}
-# IN FUNCTION:
+# IN FUNCTION ARIMA:
    # serie: i.e. ts_inflation  (Time series data)
    # modelname: i.e. arima_2   (Name of the model)
    # order: i.e. c(2,0,0)      (ARIMA order)
@@ -316,7 +315,7 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
   
     if (start_month_index <= 0) {
       start_month_index <- 12 + start_month_index
-      end_month_index <- start_month_index - 1
+      # end_month_index <- start_month_index - 1
       startYearToFcast <- startYearToFcast - 1
     }
   
@@ -327,9 +326,21 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
   
   # Cicle
   for (i in 1:nfcast) {
-    print(paste0("Final de la in-Sample: c(", startYearToFcast, ", ", end_month_index - h + i, ")"))
-    inSample <- window(serie, end = c(startYearToFcast, end_month_index - h + i))
-    model <- Arima(inSample, order = order, seasonal = list(order = c(0,0,0), period = period))
+    # print(paste0("Final de la in-Sample: c(", startYearToFcast, ", ", end_month_index - h + i, ")"))
+    
+    # For a time series uncomment:
+      inSample <- window(serie, end = c(startYearToFcast, end_month_index - h + i))
+      
+    # Model: To use an ARIMA:
+      model <- Arima(inSample, order = order, seasonal = list(order = c(0,0,0), period = period))
+      
+      # Test de autocorrelación
+      test <- Box.test(model$residuals, type = "Ljung-Box")
+      print(paste0("test de Ljung-Box: ", test$p.value))
+      # ACF de los residuales
+        # acf(model$residuals, lag.max = 24)
+      print(" ------------------------------------------ ")
+      
     
     forecast_vector[i] <- forecast(model, h = h)$mean
     # print(forecast_vector[i])
@@ -349,21 +360,159 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
   assign("outSample_observed", window(serie, start = c(startYearToFcast, end_month_index + 1)), envir = .GlobalEnv)
   assign("outSample_expected", window(ts_expect_t, start = c(startYearToFcast, end_month_index + 1)), envir = .GlobalEnv)
   
+  # RMSFE:
+  # RMSFE <- sqrt(mean((outSample_observed - forecast_vector)^2))
+  RMSFE <- sqrt(mean((na.omit(as.vector(outSample_observed)) - na.omit(forecast_vector[1:outSampleSize]))^2))
+  print(paste0("RMSFE del modelo: ", round(RMSFE, 4)))
+  
+  # To show last forecast:
+  print(paste0("Forecast de abril de 2024: ", round(forecast_vector[nfcast], 3)))
+  print(" ------------------------------------------ ")
+  
   return(forecast_vector)
   # El output es una serie de tiempo con las predicciones llamada forecast_"model_name", donde "model_name" es el nombre del modelo.
 }
 
-# 
-iterate_forecast(ts_inflation, "rw", c(0,1,0), 1, 24, 1)
-iterate_forecast(ts_inflation, "arima100", c(2,0,0), 12, 24, 1)
+# outSample_expected
+```
 
-forecast_arima200
-forecast_1 <- forecast_arima100
+## Función para iterar en el forecast con modelos lineales
+
+
+```{r}
+# IN FUNCTION LINEAR MODEL:
+   # df: i.e. ts_inflation  (Time series data) (data frame)
+   # modelname: i.e. arima_2   (Name of the model)
+   # outSampleSize: i.e. 24    (Tamaño de la muestra de validación)
+   
+iterate_forecast_linear <- function(df, model_name, outSampleSize) {
+  h <- 1
+  # Number of forecasts:
+  nfcast <- outSampleSize + h
+  
+  # Start year of the forecast (using nfcast):
+    lastMonth <- as.numeric(format(df$fecha[dim(df)[1]], "%m"))
+  
+    startYearToFcast <- floor(currentYear + ((lastMonth)/12) - ((outSampleSize)/12) )
+    start_month_index <- lastMonth - (outSampleSize %% 12)
+    end_month_index <- start_month_index - 1
+    
+      if (start_month_index <= 0) {
+        start_month_index <- 12 + start_month_index
+        # end_month_index <- start_month_index - 1
+        startYearToFcast <- startYearToFcast - 1
+      }
+  
+  
+  # Create a vector to save the forecast:
+    forecast_vector <- rep(NA, nfcast)
+    forecast_Li <- rep(NA, nfcast)
+    forecast_Ui <- rep(NA, nfcast)
+  
+  # Cicle
+    for (i in 1:nfcast) {
+      # print(paste0("Final de la in-Sample: c(", startYearToFcast, ", ", end_month_index - h + i, ")"))
+      
+      # For a time series uncomment:
+        # inSample <- window(serie, end = c(startYearToFcast, end_month_index - h + i))
+      # For a data frame uncomment:
+      inSamplePlus <- filter(df, as.numeric(format(fecha, "%Y")) <= startYearToFcast)
+      inSample <- inSamplePlus[1:(length(inSamplePlus[,1]) - 12 + end_month_index - h + i),]
+      # inSamplePlus <- filter(df, as.numeric(format(fecha, "%Y")) <= 2022)
+      # inSample <- inSamplePlus[1:(length(inSamplePlus[,1]) - 12 + 3),]
+      
+      
+      
+      
+      
+      # Model: To use a linear model:
+      model <- lm(inflation ~ inflation_lag + inflation_lag12 + inflation_lag24 + expect_t, data = inSample)
+      # summary(model)
+      
+      
+      
+      
+      
+      df_forecast <- df[length(inSample[,1])+1,]
+      forecast <- forecast(model, h = h, level = 0.90, newdata = df_forecast)
+      forecast_vector[i] <- forecast$mean
+      forecast_Li[i] <- forecast$lower
+      forecast_Ui[i] <- forecast$upper
+      # print(forecast_vector[i])
+    }
+  
+  # Date of the out-of-sample:
+    Date <- seq(as.Date(paste0(startYearToFcast, "-", end_month_index + 1, "-01")), by = "month", length.out = nfcast)
+    assign("Date", Date, envir = .GlobalEnv)
+  
+  # convert `forecast_vector` to a time series:
+    forecast_vector <- ts(forecast_vector, start = c(startYearToFcast, end_month_index + 1), frequency = 12)
+    # assign("forecast_vector", forecast_vector, envir = .GlobalEnv)
+  
+  # export intervals:
+    assign(paste0("forecast_", model_name, "_Li"), forecast_Li, envir = .GlobalEnv)
+    assign(paste0("forecast_", model_name, "_Ui"), forecast_Ui, envir = .GlobalEnv)
+  
+  # export forecasts:
+    assign(paste0("forecast_", model_name), forecast_vector, envir = .GlobalEnv)
+  
+  # Creación del outSample global:
+    outSample <- df[(length(df[,1]) - outSampleSize):length(df[,1]),]
+    assign("outSample", outSample, envir = .GlobalEnv)
+    
+  # Creación de un outSample_observed y un outSample_expected and declare them as global variables:
+    # assign("outSample_observed", window(serie, start = c(startYearToFcast, end_month_index + 1)), envir = .GlobalEnv)
+    # In df:
+    outSample_observed <- outSample$inflation
+    # assign("outSample_observed", outSample_observed, envir = .GlobalEnv)
+    
+    # assign("outSample_expected", window(ts_expect_t, start = c(startYearToFcast, end_month_index + 1)), envir = .GlobalEnv)
+    # In df:
+    outSample_expected <- outSample$expect_t
+    # assign("outSample_expected", outSample_expected, envir = .GlobalEnv)
+    
+  # RMSFE:
+  # RMSFE <- sqrt(mean((outSample_observed - forecast_vector)^2))
+    # print(paste0("length of na.omit(outSample_observed) = ", length(na.omit(outSample_observed))))
+    # assign("outSample_observed", outSample_observed, envir = .GlobalEnv)
+    # print(paste0("length of forecast_vector[1:", outSampleSize, "] = ", length(forecast_vector[1:outSampleSize])))
+    # assign("forecast_vector", forecast_vector, envir = .GlobalEnv)
+    RMSFE <- sqrt( mean( (na.omit(outSample_observed) - forecast_vector[1:outSampleSize] )^2))
+    print(paste0("RMSFE del modelo: ", round(RMSFE, 4)))
+  
+  # To show last forecast:
+    print(paste0("Forecast de abril de 2024: ", round(forecast_vector[nfcast], 3)))
+    print("------------------------------------------")
+    
+  # return(forecast_vector)
+    print("Datos del forecast:")
+    print(forecast_vector)
+    print(" ------------------------------------------ ")
+  
+  return(summary(model))
+}
+
+# outSample_expected
+```
+
+
+```{r}
+# ARIMA
+iterate_forecast(ts_inflation, "arima", c(2,1,1), 12, 24, 1)
+forecast_1 <- forecast_arima
 ```
 
 ```{r}
+# LINEAR MODEL
+iterate_forecast_linear(df, "model", 12)
+forecast_1 <- forecast_model
+```
+
+
+```{r}
 # Plot de la predicción (con intervalos de confianza) y de los datos reales (outSample):
-time <- Date
+time <- as.Date(outSample$fecha)
+
 
 plot_2 <- ggplot() +
   geom_line(data = forecast_1, aes(x = time, y = forecast_1), color = "orange", linetype = "dashed") +
@@ -378,7 +527,7 @@ plot_2 <- ggplot() +
   geom_line(data = outSample_expected, aes(x = time, y = outSample_expected), color = "gray", linetype = "dashed") +
   
   # Título y ejes:
-  labs(title = "ARIMA Forecasting", x = "Time", y = "Inflation") +
+  labs(title = "AR() + Expectativas de inflación en t (Modelo 2)", x = "Time", y = "Inflation") +
   # Línea en y = 0:
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
   # Put the legend at the bottom:
@@ -390,11 +539,11 @@ plot_2 <- ggplot() +
   
   # X ticks mensuales y rotados 90 grados:
   scale_x_date(date_labels = "%b %Y", date_breaks = "1 month") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  theme_minimal()
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  # theme_minimal()
 
 # pdf saved and opened:
-ggsave("plot_2.pdf", plot_2, width = 10, height = 6)
+ggsave("linear_2.pdf", plot_2, width = 10, height = 6)
 plot_2
 
 ```
