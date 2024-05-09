@@ -75,8 +75,16 @@ currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
 # Cortar datos hasta currentMonth
   cetes28 <- filter(cetes28, as.numeric(substr(fecha, 1, 4)) < currentYear | as.numeric(substr(fecha, 6, 7)) <= last_month)
 
+# diff_cetes28
+  cetes28$diff_cetes28 <- c(NA, diff(cetes28$cetes28))
+  
+# Lag de diff_cetes28:
+  cetes28$diff_cetes28_lag <- c(NA, cetes28$diff_cetes28[1:dim(cetes28)[1]-1])
+  
 # Integrar a df:
   df$cetes28 <- cetes28$cetes28
+  df$diff_cetes28 <- cetes28$diff_cetes28
+  df$diff_cetes28_lag <- cetes28$diff_cetes28_lag
   
 # Integrar cetes28_lag:
   df$cetes28_lag <- c(NA, df$cetes28[1:dim(df)[1]-1])
@@ -87,19 +95,35 @@ currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
 ```{r}
 # Tipo de cambio .csv:
   exchange_rate <- read.csv("mxn.csv")
+  
+# Delete first column:
+  exchange_rate <- exchange_rate[, -1]
 
 # Rename:
-  colnames(exchange_rate) <- c("index", "fecha", "exchange_rate")
+  colnames(exchange_rate) <- c("fecha", "exchange_rate")
+  
+# Date is as YYYY/MM. Now we will put as YYYY/MM/DD:
+  exchange_rate$fecha <- paste0(exchange_rate$fecha, "-01")
 
 # Formato de fecha:
-  exchange_rate$fecha <- as.Date(exchange_rate$fecha, format = "%d/%m/%Y")
+  exchange_rate$fecha <- as.Date(exchange_rate$fecha, format = "%Y-%m-%d")
 
-# Cortar datos desde currentYear:
-  exchange_rate <- "a"
+# Cortar datos desde start_year:
+  exchange_rate <- filter(exchange_rate, as.numeric(substr(fecha, 1, 4)) >= start_year)
   
-# Cortar datos hasta currentMonth
-  exchange_rate <- filter(exchange_rate, as.numeric(substr(fecha, 1, 4)) < currentYear | as.numeric(substr(fecha, 6, 7)) <= last_month)
+# Cortar datos hasta currentMonth (hasta 2024-04:
+  # exchange_rate <- filter(exchange_rate, as.numeric(substr(fecha, 1, 7)) 
   
+# diff_exchange_rate:
+  exchange_rate$diff_exchange_rate <- c(NA, diff(exchange_rate$exchange_rate))
+  
+# Lag de diff_exchange_rate:
+  exchange_rate$diff_exchange_rate_lag <- c(NA, exchange_rate$diff_exchange_rate[1:dim(exchange_rate)[1]-1])
+
+# Integrar a df:
+  df$exchange_rate <- exchange_rate$exchange_rate
+  df$diff_exchange_rate <- exchange_rate$diff_exchange_rate
+  df$diff_exchange_rate_lag <- exchange_rate$diff_exchange_rate_lag
 
 ```
 
@@ -308,6 +332,8 @@ ggplot() +
 inSample <- window(ts_inflation, end = c(2022, 3))
 outSample <- window(ts_inflation, start = c(2022, 4))
 outSampleExpectation <- window(ts_expect_t, start = c(2022, 4))
+
+# rm(inSample, outSample, outSampleExpectation)
 ```
 
 ## ARIMA(0,1,0)[12] con Out-of-sample = 24 (NO CORRER si no es necesario)
@@ -338,11 +364,6 @@ df_forecast <- data.frame(time = time(forecast_rw), forecast_rw)
 
 
 ## Función para iterar en el forecast con ARIMAS
-
-
-```{r}
-# marianoDieboldError <- rep(NA, 2)
-```
 
 ```{r}
 # IN FUNCTION ARIMA:
@@ -465,7 +486,6 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
 
 ## Función para iterar en el forecast con modelos lineales
 
-
 ```{r}
 # IN FUNCTION LINEAR MODEL:
    # df: i.e. ts_inflation  (Time series data) (data frame)
@@ -516,7 +536,8 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
       # model <- lm(inflation ~ cetes28 + cetes28_lag, data = inSample)
       # model <- lm(inflation ~ inflation_lag + inflation_lag12 + inflation_lag24 + cetes28 + cetes28_lag, data = inSample)
       # model <- lm(inflation ~ inflation_lag + inflation_lag12 + inflation_lag24 + expect_t, data = inSample)
-      model <- auto.arima(inSample$inflation, xreg = inSample$expect_t, seasonal = TRUE)
+      # model <- auto.arima(inSample$inflation, xreg = inSample$expect_t, seasonal = TRUE)
+      model <- modelFn(inSample)
       # summary(model)
       
       
@@ -527,7 +548,9 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
       # forecast <- forecast(model, h = h, level = 0.90, newdata = df_forecast)
       # 
       forecast_expect <- matrix(data = df_forecast$expect_t, ncol = 1)
-      forecast <- forecast(model, xreg = forecast_expect, h = h, level = 0.90)
+
+      # forecast <- forecast(model, xreg = forecast_expect, h = h, level = 0.90)
+      forecast <- forecast(model, h = h, level = 0.90, newdata = df_forecast)
       
       forecast_vector[i] <- forecast$mean
       forecast_Li[i] <- forecast$lower
@@ -628,21 +651,62 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
 # outSample_expected
 ```
 
+## Forecast
+
+### ARIMA
 
 ```{r}
 # ARIMA
 iterate_forecast(ts_inflation, "arima", c(3,0,1), 1, 24, 1)
 forecast_1 <- forecast_arima
 ```
-<!-- Para no correr el código al compilar markdown -->
-<!-- ```{r, eval = FALSE} -->
+
+### LINEAR MODEL
+
 ```{r}
 # LINEAR MODEL
+
+modelFn <- function(dataset) {
+  
+  model <- lm(inflation ~ inflation_lag + inflation_lag12 + inflation_lag24 + expect_t1 + exchange_rate + diff_cetes28, data = dataset)
+  assign("model", model, envir = .GlobalEnv)
+  return(model)
+  
+}
+
+# diff(df$cetes28, 1)
+# 
+# diff(df$cetes28)
+# df
+
+# LINEAR MODEL
+
 iterate_forecast_linear(df, "model", 24)
 forecast_1 <- forecast_model
+
 # forecast_intervals
 ```
 
+
+```{r}
+# Test de estacionariedad a exchange_rate:
+adf.test(na.omit(df$diff_exchange_rate), alternative = "stationary")
+
+# Exploratory summary of diff_exchange_rate:
+summary(df$diff_exchange_rate)
+
+#Dummy for max value:
+df$outlier_diff_exchange_rate <- ifelse(df$diff_exchange_rate == max(df$diff_exchange_rate, na.rm = TRUE), 1, 0)
+
+
+# plot of diff_exchange_rate:
+ggplot() +
+  geom_line(data = df, aes(x = fecha, y = diff_exchange_rate), color = "black") +
+  labs(title = "Diferencia en el tipo de cambio MXN-USD", x = "Fecha", y = "Tipo de cambio") +
+  theme_minimal()
+```
+
+<!-- Gráfica -->
 
 ```{r}
 # Plot de la predicción (con intervalos de confianza) y de los datos reales (outSample):
