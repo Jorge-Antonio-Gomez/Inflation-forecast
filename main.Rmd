@@ -318,6 +318,11 @@ df_forecast <- data.frame(time = time(forecast_rw), forecast_rw)
 
 ## Función para iterar en el forecast con ARIMAS
 
+
+```{r}
+# marianoDieboldError <- rep(NA, 2)
+```
+
 ```{r}
 # IN FUNCTION ARIMA:
    # serie: i.e. ts_inflation  (Time series data)
@@ -347,6 +352,8 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
   
   # Create a vector to save the forecast:
   forecast_vector <- rep(NA, nfcast)
+  forecast_Li <- rep(NA, nfcast)
+  forecast_Ui <- rep(NA, nfcast)
   
   # Cicle
   for (i in 1:nfcast) {
@@ -358,17 +365,31 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
     # Model: To use an ARIMA:
       model <- Arima(inSample, order = order, seasonal = list(order = c(0,0,0), period = period))
       
-      # Test de autocorrelación
-      test <- Box.test(model$residuals, type = "Ljung-Box")
-      print(paste0("test de Ljung-Box: ", test$p.value))
-      # ACF de los residuales
-        # acf(model$residuals, lag.max = 24)
-      print(" ------------------------------------------ ")
       
-    
-    forecast_vector[i] <- forecast(model, h = h)$mean
+    forecast <- forecast(model, h = h, level = 0.90)
+    forecast_vector[i] <- forecast$mean
+    forecast_Li[i] <- forecast$lower
+    forecast_Ui[i] <- forecast$upper
     # print(forecast_vector[i])
-  }
+    
+      # Test de autocorrelación
+      if (i == nfcast) {
+        test <- Box.test(model$residuals, type = "Ljung-Box")
+        print(paste0("test de Ljung-Box: ", test$p.value))
+        # ACF de los residuales
+          # acf(model$residuals, lag.max = 24)
+        print(" ------------------------------------------ ")
+      }
+    }
+  
+  # export intervals:
+    forecast_Li <- data.frame(Date, forecast_Li)
+    forecast_Ui <- data.frame(forecast_Ui)
+    forecast_intervals <- cbind(forecast_Li, forecast_Ui)
+    # assign(paste0("forecast__Li"), forecast_Li, envir = .GlobalEnv)
+    # assign(paste0("forecast__Ui"), forecast_Ui, envir = .GlobalEnv)
+    assign(paste0("forecast_intervals"), forecast_intervals, envir = .GlobalEnv)
+    
   
   # Date of the out-of-sample:
   Date <- seq(as.Date(paste0(startYearToFcast, "-", end_month_index + 1, "-01")), by = "month", length.out = nfcast)
@@ -388,11 +409,29 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
   # RMSFE <- sqrt(mean((outSample_observed - forecast_vector)^2))
   RMSFE <- sqrt(mean((na.omit(as.vector(outSample_observed)) - na.omit(forecast_vector[1:outSampleSize]))^2))
   print(paste0("RMSFE del modelo: ", round(RMSFE, 4)))
-  
-  # To show last forecast:
-  print(paste0("Forecast de abril de 2024: ", round(forecast_vector[nfcast], 3)))
   print(" ------------------------------------------ ")
   
+  
+  # Mariano Diebold test:
+    marianoDieboldError <- c(rep(NA, outSampleSize))
+    # marianoDieboldError <- as.vector(na.omit(as.vector(outSample_observed)) - na.omit(forecast_vector[1:outSampleSize]))
+    for (i in 1:outSampleSize) {
+      marianoDieboldError[i] <- na.omit(as.vector(outSample_observed))[i] - na.omit(forecast_vector[1:outSampleSize])[i]
+    }
+    assign("marianoDieboldError_2", marianoDieboldError, envir = .GlobalEnv)
+    print(paste0("Mariano Diebold error: ", marianoDieboldError))
+    print(" ------------------------------------------ ")
+  
+  # To show last forecast:
+    print(paste0("Forecast de abril de 2024: ", round(forecast_vector[nfcast], 3)))
+    print(" ------------------------------------------ ")
+  
+  # print observed data:
+    print("Datos observados:")
+    print(paste0("outSample_observed: ", outSample_observed))
+    print(" ------------------------------------------ ")
+  
+    print("Datos del forecast:")
   return(forecast_vector)
   # El output es una serie de tiempo con las predicciones llamada forecast_"model_name", donde "model_name" es el nombre del modelo.
 }
@@ -456,12 +495,6 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
       model <- auto.arima(inSample$inflation, xreg = inSample$expect_t, seasonal = TRUE)
       # summary(model)
       
-      if (i == nfcast) {
-        boxTest <- Box.test(model$residuals, type = "Ljung-Box")
-        # print box test:
-        print(paste0("Box.test p-value: ", boxTest$p.value))
-      }
-      
       
       
       
@@ -476,6 +509,12 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
       forecast_Li[i] <- forecast$lower
       forecast_Ui[i] <- forecast$upper
       # print(forecast_vector[i])
+      
+      if (i == nfcast) {
+        boxTest <- Box.test(model$residuals, type = "Ljung-Box")
+        # print box test:
+        print(paste0("Box.test p-value: ", boxTest$p.value))
+      }
     }
   
   # Date of the out-of-sample:
@@ -540,7 +579,23 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
     print(checkresiduals(model))
     dev.off()
     
-  return(checkresiduals(model))
+  # Mariano Diebold test:
+    marianoDieboldError <- c(rep(NA, outSampleSize))
+    # marianoDieboldError <- as.vector(na.omit(as.vector(outSample_observed)) - na.omit(forecast_vector[1:outSampleSize]))
+    for (i in 1:outSampleSize) {
+      marianoDieboldError[i] <- na.omit(as.vector(outSample_observed))[i] - na.omit(forecast_vector[1:outSampleSize])[i]
+    }
+    assign("marianoDieboldError_1", marianoDieboldError, envir = .GlobalEnv)
+    print(paste0("Mariano Diebold error: ", marianoDieboldError))
+    print(" ------------------------------------------ ")
+    
+    # print observed data:
+    print("Datos observados:")
+    print(paste0("outSample_observed: ", outSample_observed))
+    print(" ------------------------------------------ ")
+  
+    print("Datos del forecast:")
+  return(forecast_vector)
 }
 
 # outSample_expected
@@ -549,7 +604,7 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
 
 ```{r}
 # ARIMA
-iterate_forecast(ts_inflation, "arima", c(2,1,1), 12, 24, 1)
+iterate_forecast(ts_inflation, "arima", c(3,0,1), 1, 24, 1)
 forecast_1 <- forecast_arima
 ```
 
@@ -557,7 +612,7 @@ forecast_1 <- forecast_arima
 # LINEAR MODEL
 iterate_forecast_linear(df, "model", 24)
 forecast_1 <- forecast_model
-forecast_intervals
+# forecast_intervals
 ```
 
 
@@ -593,7 +648,8 @@ plot_2 <- ggplot() +
     geom_ribbon(data = forecast_intervals, aes(x = time, ymin = forecast_intervals$forecast_Li, ymax = forecast_intervals$forecast_Ui), fill = "blue", alpha = 0.1) +
   
   # Título y ejes:
-  labs(title = "ARIMA(0,1,3) + expectativas de inflación frente a la inflación observada",
+  # labs(title = "ARIMA(0,1,3) + expectativas de inflación frente a la inflación observada",
+  labs(title = "ARIMA(3,0,1) frente a la inflación observada",
        x = "Fecha", y = "Inflación mensual") +
   # Línea en y = 0:
   geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
@@ -610,11 +666,18 @@ plot_2 <- ggplot() +
   # theme_minimal()
 
 # pdf saved and opened:
-ggsave("arima(0,1,3)_VS_observed.pdf", plot_2, width = 10, height = 6)
+ggsave("arima(3,0,1)_VS_observed.pdf", plot_2, width = 10, height = 6)
 # ggsave("expected_vs_observed.pdf", plot_2, width = 10, height = 6)
 plot_2
 
 ```
+
+```{r}
+DieboldMarianoTest <- data.frame(marianoDieboldError_1, marianoDieboldError_2)
+  colnames(DieboldMarianoTest) <- c("model_1", "model_2")
+  DieboldMarianoTest
+```
+
 
 ### RMSFE
 
