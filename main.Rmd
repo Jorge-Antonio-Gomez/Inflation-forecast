@@ -82,6 +82,27 @@ currentYear <- as.numeric(format(df$fecha[dim(df)[1]], "%Y"))
   df$cetes28_lag <- c(NA, df$cetes28[1:dim(df)[1]-1])
 ```
 
+## Tipo de Cambio
+
+```{r}
+# Tipo de cambio .csv:
+  exchange_rate <- read.csv("mxn.csv")
+
+# Rename:
+  colnames(exchange_rate) <- c("index", "fecha", "exchange_rate")
+
+# Formato de fecha:
+  exchange_rate$fecha <- as.Date(exchange_rate$fecha, format = "%d/%m/%Y")
+
+# Cortar datos desde currentYear:
+  exchange_rate <- "a"
+  
+# Cortar datos hasta currentMonth
+  exchange_rate <- filter(exchange_rate, as.numeric(substr(fecha, 1, 4)) < currentYear | as.numeric(substr(fecha, 6, 7)) <= last_month)
+  
+
+```
+
 
 # Análisis Exploratorio
 
@@ -419,17 +440,20 @@ iterate_forecast <- function(serie, model_name, order, period, outSampleSize, h)
       marianoDieboldError[i] <- na.omit(as.vector(outSample_observed))[i] - na.omit(forecast_vector[1:outSampleSize])[i]
     }
     assign("marianoDieboldError_2", marianoDieboldError, envir = .GlobalEnv)
-    print(paste0("Mariano Diebold error: ", marianoDieboldError))
-    print(" ------------------------------------------ ")
+    # print(paste0("Mariano Diebold error: ", marianoDieboldError))
+    # print(" ------------------------------------------ ")
   
   # To show last forecast:
     print(paste0("Forecast de abril de 2024: ", round(forecast_vector[nfcast], 3)))
+    # Intervalos de confianza en cbind:
+    print(paste0("Límite superior del pronóstico: ", round(forecast_intervals$forecast_Ui[nfcast], 3)))
+    print(paste0("Límite inferior del pronóstico: ", round(forecast_intervals$forecast_Li[nfcast], 3)))
     print(" ------------------------------------------ ")
   
   # print observed data:
-    print("Datos observados:")
-    print(paste0("outSample_observed: ", outSample_observed))
-    print(" ------------------------------------------ ")
+    # print("Datos observados:")
+    # print(paste0("outSample_observed: ", outSample_observed))
+    # print(" ------------------------------------------ ")
   
     print("Datos del forecast:")
   return(forecast_vector)
@@ -562,12 +586,15 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
   
   # To show last forecast:
     print(paste0("Forecast de abril de 2024: ", round(forecast_vector[nfcast], 3)))
+    # Intervalos de confianza en cbind:
+    print(paste0("Límite superior del pronóstico: ", round(forecast_intervals$forecast_Ui[nfcast], 3)))
+    print(paste0("Límite inferior del pronóstico: ", round(forecast_intervals$forecast_Li[nfcast], 3)))
     print("------------------------------------------")
     
   # return(forecast_vector)
-    print("Datos del forecast:")
-    print(forecast_vector)
-    print(" ------------------------------------------ ")
+    # print("Datos del forecast:")
+    # print(forecast_vector)
+    # print(" ------------------------------------------ ")
     
   # return(summary(model))
     print("Datos del modelo:")
@@ -586,13 +613,13 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
       marianoDieboldError[i] <- na.omit(as.vector(outSample_observed))[i] - na.omit(forecast_vector[1:outSampleSize])[i]
     }
     assign("marianoDieboldError_1", marianoDieboldError, envir = .GlobalEnv)
-    print(paste0("Mariano Diebold error: ", marianoDieboldError))
-    print(" ------------------------------------------ ")
+    # print(paste0("Mariano Diebold error: ", marianoDieboldError))
+    # print(" ------------------------------------------ ")
     
     # print observed data:
-    print("Datos observados:")
-    print(paste0("outSample_observed: ", outSample_observed))
-    print(" ------------------------------------------ ")
+    # print("Datos observados:")
+    # print(paste0("outSample_observed: ", outSample_observed))
+    # print(" ------------------------------------------ ")
   
     print("Datos del forecast:")
   return(forecast_vector)
@@ -607,7 +634,8 @@ iterate_forecast_linear <- function(df, model_name, outSampleSize) {
 iterate_forecast(ts_inflation, "arima", c(3,0,1), 1, 24, 1)
 forecast_1 <- forecast_arima
 ```
-
+<!-- Para no correr el código al compilar markdown -->
+<!-- ```{r, eval = FALSE} -->
 ```{r}
 # LINEAR MODEL
 iterate_forecast_linear(df, "model", 24)
@@ -676,6 +704,11 @@ plot_2
 DieboldMarianoTest <- data.frame(marianoDieboldError_1, marianoDieboldError_2)
   colnames(DieboldMarianoTest) <- c("model_1", "model_2")
   DieboldMarianoTest
+  
+# DieboldMarianoTest
+  dm.test(DieboldMarianoTest$model_1, DieboldMarianoTest$model_2, alternative = "two.sided")
+
+# Hipótesis nula: Los errores de pronóstico son iguales
 ```
 
 
